@@ -1,0 +1,206 @@
+diff --git a/backend/main.py b/backend/main.py
+index 05819ca..9668379 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -1,9 +1,18 @@
++import os
+ import re
+-from fastapi import FastAPI, HTTPException
++import uuid
++from fastapi import FastAPI, HTTPException, UploadFile, File, Request
+ from fastapi.middleware.cors import CORSMiddleware
++from fastapi.staticfiles import StaticFiles
+ from pydantic import BaseModel
+ from db import get_conn, init_db
+ 
++UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
++os.makedirs(UPLOADS_DIR, exist_ok=True)
++
++ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"}
++MAX_UPLOAD_BYTES = 20 * 1024 * 1024
++
+ app = FastAPI(title="LinkNotes API")
+ 
+ app.add_middleware(
+@@ -13,7 +22,9 @@ app.add_middleware(
+     allow_headers=["*"],
+ )
+ 
+-LINK_PATTERN = re.compile(r"\[\[(.+?)\]\]")
++app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
++
++LINK_PATTERN = re.compile(r"\[\[([^\|\]]+)(?:\|[^\]]+)?\]\]")
+ 
+ 
+ class NoteCreate(BaseModel):
+@@ -180,3 +191,170 @@ def delete_note(note_id: int):
+     if not deleted:
+         raise HTTPException(status_code=404, detail="Note not found")
+     return {"message": "Note deleted"}
++
++
++@app.get("/api/search")
++def search(q: str, weight: float = 0.3, limit: int = 20):
++    """Combined ranking: (1-weight)*ts_rank + weight*normalized_pagerank."""
++    if not q.strip():
++        return []
++    weight = max(0.0, min(1.0, weight))
++    conn = get_conn()
++    cur = conn.cursor()
++    cur.execute(
++        """
++        WITH query AS (SELECT plainto_tsquery('english', %s) AS q)
++        SELECT
++            n.id,
++            n.title,
++            ts_rank(n.search_vector, query.q) AS text_score,
++            COALESCE(pr.score, 0) AS graph_score,
++            ((1 - %s) * ts_rank(n.search_vector, query.q)
++             + %s * COALESCE(pr.score, 0)) AS combined_score,
++            ts_headline(
++                'english', n.content, query.q,
++                'MaxWords=25, MinWords=10, ShortWord=3, HighlightAll=false'
++            ) AS snippet
++        FROM notes n
++        LEFT JOIN page_rank pr ON pr.note_id = n.id
++        CROSS JOIN query
++        WHERE n.search_vector @@ query.q
++        ORDER BY combined_score DESC
++        LIMIT %s
++        """,
++        (q, weight, weight, limit),
++    )
++    results = cur.fetchall()
++    cur.close()
++    conn.close()
++    return results
++
++
++@app.get("/api/orphans")
++def list_orphans():
++    """Notes with no incoming and no outgoing links."""
++    conn = get_conn()
++    cur = conn.cursor()
++    cur.execute(
++        """
++        SELECT n.id, n.title
++        FROM notes n
++        WHERE NOT EXISTS (
++            SELECT 1 FROM links
++            WHERE source_note_id = n.id OR target_note_id = n.id
++        )
++        ORDER BY n.title
++        """
++    )
++    orphans = cur.fetchall()
++    cur.close()
++    conn.close()
++    return orphans
++
++
++@app.get("/api/path")
++def shortest_path(from_id: int, to_id: int, max_depth: int = 8):
++    """BFS shortest directed path from from_id to to_id over the link graph."""
++    conn = get_conn()
++    cur = conn.cursor()
++    cur.execute(
++        """
++        WITH RECURSIVE bfs(node, depth, path) AS (
++            SELECT %s::int, 0, ARRAY[%s::int]
++            UNION ALL
++            SELECT l.target_note_id, b.depth + 1, b.path || l.target_note_id
++            FROM bfs b
++            JOIN links l ON l.source_note_id = b.node
++            WHERE b.depth < %s AND NOT (l.target_note_id = ANY(b.path))
++        )
++        SELECT depth, path FROM bfs WHERE node = %s ORDER BY depth LIMIT 1
++        """,
++        (from_id, from_id, max_depth, to_id),
++    )
++    row = cur.fetchone()
++    if not row:
++        cur.close()
++        conn.close()
++        return {"found": False, "path": []}
++
++    path_ids = row["path"]
++    cur.execute("SELECT id, title FROM notes WHERE id = ANY(%s)", (path_ids,))
++    titles = {n["id"]: n["title"] for n in cur.fetchall()}
++    cur.close()
++    conn.close()
++    return {
++        "found": True,
++        "depth": row["depth"],
++        "path": [{"id": i, "title": titles.get(i, "?")} for i in path_ids],
++    }
++
++
++@app.post("/api/upload")
++async def upload_file(request: Request, file: UploadFile = File(...)):
++    """Accept an image or PDF, store under uploads/, return the served URL."""
++    original = file.filename or "upload"
++    ext = os.path.splitext(original)[1].lower()
++    if ext not in ALLOWED_EXTS:
++        raise HTTPException(
++            status_code=400,
++            detail=f"Unsupported file type '{ext}'. Allowed: {sorted(ALLOWED_EXTS)}",
++        )
++
++    contents = await file.read()
++    if len(contents) > MAX_UPLOAD_BYTES:
++        raise HTTPException(status_code=413, detail="File too large (max 20 MB)")
++
++    new_name = f"{uuid.uuid4().hex}{ext}"
++    with open(os.path.join(UPLOADS_DIR, new_name), "wb") as f:
++        f.write(contents)
++
++    base = str(request.base_url).rstrip("/")
++    return {
++        "url": f"{base}/uploads/{new_name}",
++        "filename": original,
++        "kind": "pdf" if ext == ".pdf" else "image",
++        "size": len(contents),
++    }
++
++
++@app.get("/api/graph")
++def get_graph():
++    """Full link graph: nodes (with PageRank score) + directed edges."""
++    conn = get_conn()
++    cur = conn.cursor()
++    cur.execute(
++        """
++        SELECT n.id, n.title, COALESCE(pr.score, 0) AS score
++        FROM notes n
++        LEFT JOIN page_rank pr ON pr.note_id = n.id
++        ORDER BY n.id
++        """
++    )
++    nodes = cur.fetchall()
++    cur.execute("SELECT source_note_id, target_note_id FROM links")
++    links = [
++        {"source": r["source_note_id"], "target": r["target_note_id"]}
++        for r in cur.fetchall()
++    ]
++    cur.close()
++    conn.close()
++    return {"nodes": nodes, "links": links}
++
++
++@app.post("/api/admin/refresh-rankings")
++def refresh_rankings_endpoint():
++    """Recompute PageRank by refreshing the materialized view."""
++    conn = get_conn()
++    cur = conn.cursor()
++    cur.execute("REFRESH MATERIALIZED VIEW page_rank;")
++    conn.commit()
++    cur.execute("SELECT COUNT(*) AS n FROM page_rank;")
++    n = cur.fetchone()["n"]
++    cur.close()
++    conn.close()
++    return {"refreshed": True, "rows": n}
++
++
++if __name__ == "__main__":
++    import uvicorn
++    uvicorn.run("main:app", reload=True)

@@ -1,0 +1,203 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{parskip}
+\usepackage{titlesec}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{listings}
+
+% Tighter section spacing
+\titlespacing*{\section}{0pt}{1.0em}{0.4em}
+\titlespacing*{\subsection}{0pt}{0.7em}{0.3em}
+
+% Hyperlink colours
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=blue!55!black,
+  citecolor=blue!55!black
+}
+
+% Code styling
+\definecolor{codebg}{RGB}{246,246,248}
+\lstdefinestyle{mono}{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  framerule=0pt,
+  xleftmargin=6pt,
+  xrightmargin=6pt,
+  breaklines=true,
+  showstringspaces=false
+}
+\lstset{style=mono}
+
+% Convenience: cite a prompt by number
+\newcommand{\prm}[1]{\href{PROMPT_LOG.md}{\textbf{[P#1]}}}
+\newcommand{\prms}[2]{\href{PROMPT_LOG.md}{\textbf{[P#1--P#2]}}}
+
+\begin{document}
+
+\begin{center}
+{\Large\bfseries LinkNotes: A Personal Knowledge Base with Full-Text Search and Link Graph Ranking}\\[0.4em]
+{\large CS349 (DBIS Lab) -- Project Report}\\[0.8em]
+\end{center}
+
+\begin{center}
+\begin{tabular}{ll}
+Mehul Borad & 23B0930 \\
+Sahil & 23B0943 \\
+Thanuj & 23B1082 \\
+Raghav Goyal & 23B0908 \\
+\end{tabular}
+\end{center}
+
+\begin{center}
+\textbf{Repository:} \url{https://github.com/Mehul-Borad/Link-Notes-DBIS}
+\end{center}
+
+\vspace{0.3em}
+
+\section{Motivation}
+
+Most note-taking apps use plain keyword matching for search, ignoring \emph{which} notes are central in your personal knowledge base. We wanted to build a wiki-style notes app where notes can link to one another via \texttt{[[Note Title]]} syntax, and where search results are ranked by a combination of (i) text relevance and (ii) graph centrality, so that frequently-referenced concepts surface first --- the same intuition behind PageRank, applied to a private corpus.
+
+The project also gave us an excuse to push PostgreSQL beyond simple CRUD: we use full-text search via \texttt{tsvector} + GIN, recursive CTEs for path-finding, a PL/pgSQL function for the iterative PageRank computation, and a materialized view to cache its result. The deliberate goal was to keep the ``interesting computation'' inside the database rather than in application code.
+
+\section{Functionality Implemented}
+
+\subsection{Notes \& links (baseline)}
+\begin{itemize}[leftmargin=1.2em,itemsep=1pt,topsep=2pt]
+\item Full CRUD on notes: title (unique), content, timestamps. Endpoints \texttt{GET/POST/PUT/DELETE /api/notes} \prms{1}{6}.
+\item \texttt{[[Title]]} and \texttt{[[Title|Alias]]} wiki-link parsing. On every save, \texttt{sync\_links()} reparses the content and rewrites the directed-edge rows in the \texttt{links} table.
+\item Backlink listing: \texttt{GET /api/notes/\{id\}} returns the note plus its outgoing links \emph{and} the notes that link to it (joined to titles).
+\item Sample seed of 10 interconnected CS notes (Operating Systems, B-Trees, etc.) so the graph has interesting structure out of the box \prm{7}.
+\item React SPA: sidebar of titles, main view, create/edit/delete forms, clickable wiki links (red), broken links shown gray with strike-through \prms{8}{11}.
+\item Bug fix in the alias regex: \texttt{[[Operating Systems|OS]]} previously stored the entire \texttt{Operating Systems|OS} string as the lookup key, so the link silently failed; the regex now strips the alias \prm{12}.
+\end{itemize}
+
+\subsection{Full-text search}
+A generated \texttt{tsvector} column on \texttt{notes} concatenates the title (weight \texttt{A}) and the content (weight \texttt{B}) using \texttt{setweight} + \texttt{to\_tsvector(\textquotesingle english\textquotesingle, ...)}, indexed by GIN. \texttt{GET /api/search?q=...} returns each match with \texttt{ts\_rank}, a \texttt{ts\_headline} snippet, and (see below) a graph centrality score \prm{13}.
+
+\subsection{PageRank as a materialized view}
+A PL/pgSQL function \texttt{compute\_pagerank(damping, max\_iter, tolerance)} runs the standard power-iteration over the \texttt{links} graph (defaults: $d{=}0.85$, 30 iterations, early-stop when $L_1$ delta $<10^{-4}$). State lives in a persistent \texttt{pr\_state} table; we initially used \texttt{TEMP TABLE}s but \texttt{REFRESH MATERIALIZED VIEW} runs in a security-restricted context that forbids temp-table creation, so we switched to an unlogged persistent table and DML-only operations \prm{14}, \prm{18}. The view \texttt{page\_rank} stores the raw probability and a normalized $[0,1]$ score; \texttt{POST /api/admin/refresh-rankings} triggers a refresh, and \texttt{seed.py} calls it after seeding.
+
+\subsection{Combined ranking}
+The search query joins \texttt{page\_rank} and computes
+\[
+\text{combined\_score} = (1-w)\cdot\text{ts\_rank} \;+\; w\cdot\text{normalized\_pagerank}, \quad w=0.3 \text{ by default}
+\]
+in a single SQL statement, so all the work happens inside one indexed query \prm{15}. The endpoint also returns the individual scores so the breakdown is visible.
+
+\subsection{Orphan detection \& shortest path}
+\texttt{GET /api/orphans} returns notes with no incoming or outgoing edges (\texttt{NOT EXISTS}). \texttt{GET /api/path?from\_id=X\&to\_id=Y} runs a BFS over the link graph using a \emph{recursive CTE} that carries the visited path as an \texttt{INT[]} for cycle detection (\verb|NOT (target = ANY(path))|), capped at depth 8 \prm{16}.
+
+\subsection{Frontend features}
+\begin{itemize}[leftmargin=1.2em,itemsep=1pt,topsep=2pt]
+\item \textbf{Search bar} in the sidebar; results replace the note list and show the score breakdown. ``Orphans'' button toggles to an orphan-only view; ``Refresh ranks'' calls the admin endpoint; per-note ``Find path to'' form with autocomplete \prm{17}.
+\item \textbf{Search-term highlighting}: matched terms are wrapped in \texttt{<mark>} in the open note's title and body, with a wavy underline variant inside \texttt{[[wiki-link]]} text so the link styling stays intact \prm{19}.
+\item \textbf{Wiki-link autocomplete}: typing \texttt{[[} pops up a dropdown of matching titles (substring match); $\uparrow/\downarrow$ to navigate, Enter/Tab inserts and auto-closes \texttt{]]}, Escape dismisses. Factored into a reusable \texttt{NoteEditor} component used by both create and edit modes \prm{20}.
+\item \textbf{Embeds and external links}: markdown-style \texttt{![alt](url)} renders an inline image (\texttt{.png/.jpg/.jpeg/.gif/.webp}) or PDF iframe (\texttt{.pdf}); \texttt{[text](url)} renders an external link \prm{21}.
+\item \textbf{File uploads}: \texttt{POST /api/upload} (multipart) validates extension, caps at 20\,MB, stores under \texttt{backend/uploads/<uuid>.<ext>}, served via \texttt{StaticFiles}; the editor's ``Attach'' button inserts \texttt{![filename](url)} at the cursor on success \prm{23}.
+\item \textbf{Graph view} (\texttt{Graph.js}): full link graph rendered with \texttt{react-force-graph-2d}. \texttt{GET /api/graph} returns nodes (with PageRank score) + directed edges \prm{22}.
+\item \textbf{Rectangle nodes \& freeze-on-drag}: nodes are rounded rectangles showing title, ``$\to N$ links'', ``$\leftarrow N$ backlinks''; arrows terminate at the rectangle edge via a custom \texttt{linkCanvasObject}; after the initial layout settles, every node is pinned (\texttt{fx/fy}) so dragging one moves only that one --- no global jitter \prm{24}.
+\item \textbf{Persistent layout}: every drag-end saves \texttt{\{id: \{x,y\}\}} to \texttt{localStorage}; on mount, saved positions are restored as \texttt{fx/fy} before the data is handed to the force engine. A ``Reset layout'' button clears storage and re-runs the simulation \prm{25}.
+\end{itemize}
+
+\section{Database Design}
+
+\begin{lstlisting}
+-- Core tables
+notes(id PK, title UNIQUE, content, created_at, updated_at,
+      search_vector tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', title),   'A') ||
+        setweight(to_tsvector('english', content), 'B')) STORED)
+links(id PK, source_note_id FK -> notes ON DELETE CASCADE,
+                target_note_id FK -> notes ON DELETE CASCADE,
+                UNIQUE(source_note_id, target_note_id))
+
+-- Indexes
+idx_notes_search    : GIN  on notes(search_vector)
+idx_links_source    : btree on links(source_note_id)
+idx_links_target    : btree on links(target_note_id)
+idx_page_rank_id    : unique btree on page_rank(note_id)
+idx_page_rank_score : btree on page_rank(score DESC)
+
+-- Computation
+pr_state              : unlogged scratch table for the iteration
+compute_pagerank(...) : PL/pgSQL function, returns (note_id, score)
+page_rank             : MATERIALIZED VIEW caching normalized scores
+\end{lstlisting}
+
+The \texttt{ON DELETE CASCADE} on \texttt{links} means deleting a note transparently cleans up its edges. The unique \texttt{(source, target)} pair plus an \texttt{ON CONFLICT DO NOTHING} insert in \texttt{sync\_links} keeps that table idempotent.
+
+\section{Code Created}
+
+The repository is organized as:
+\begin{lstlisting}
+backend/
+  db.py            schema, init_db(), refresh_rankings(), PageRank fn, matview
+  main.py          FastAPI app: notes CRUD, search, orphans, path,
+                   upload, graph, admin/refresh-rankings
+  seed.py          10-note CS-topics seed + auto-refresh
+  requirements.txt fastapi, uvicorn, psycopg2-binary, pydantic,
+                   python-dotenv, python-multipart
+  uploads/         user-uploaded images and PDFs (gitignored)
+frontend/
+  src/App.js       sidebar, note CRUD, search/orphans/path UI,
+                   highlighting, NoteEditor with [[ autocomplete and
+                   file upload, view toggle
+  src/Graph.js     react-force-graph-2d wrapper, rectangle nodes,
+                   custom edge-routed arrows, layout persistence
+  src/App.css      styling for everything above
+PROMPT_LOG.md      25 prompts used during development
+report.tex / .pdf  this report
+.gitignore         excludes .venv, node_modules, uploads, build, .env
+\end{lstlisting}
+
+Roughly: \verb|db.py| $\sim$130 lines, \verb|main.py| $\sim$300 lines, \verb|App.js| $\sim$580 lines, \verb|Graph.js| $\sim$220 lines.
+
+\section{How We Used AI}
+
+We used Claude (the \texttt{Sonnet} family) for nearly all code generation, then copy-pasted, ran, and modified the output as needed. Every prompt is recorded verbatim in \href{PROMPT_LOG.md}{\texttt{PROMPT\_LOG.md}}. Roles in our session:
+
+\begin{itemize}[leftmargin=1.2em,itemsep=1pt,topsep=2pt]
+\item \prms{1}{4} \emph{Schema and primitives.} Generating the SQL schema, the psycopg2 connection helper with \texttt{init\_db}, the wiki-link regex, and \texttt{sync\_links}.
+\item \prms{5}{7} \emph{API + seed.} The complete CRUD layer in FastAPI, backlink retrieval, and the 10-note CS-topics seed with cross-references.
+\item \prms{8}{11} \emph{Frontend baseline.} Sidebar + note CRUD UI, link rendering, and visual styling.
+\item \prm{12} \emph{Bug fix.} A targeted regex repair for \texttt{[[Title|Alias]]}.
+\item \prms{13}{17} \emph{The DB-heavy core.} Full-text search with weighted tsvector + GIN, the PL/pgSQL PageRank with iteration loop and convergence check, materialized view + refresh endpoint, combined ranking, orphan detection, recursive-CTE BFS for shortest path, and the corresponding React UI.
+\item \prm{18} \emph{Debugging.} Diagnosing and fixing the ``cannot create temporary table within security-restricted operation'' error from \texttt{REFRESH MATERIALIZED VIEW}, which led us to switch from temp tables to a persistent \texttt{pr\_state} table.
+\item \prms{19}{25} \emph{Polish features.} Search highlighting, \texttt{[[} autocomplete, image/PDF/external-link rendering, the graph view with react-force-graph-2d, file uploads with multipart parsing, the rectangle-node redesign with freeze-on-drag, and \texttt{localStorage}-backed layout persistence.
+\end{itemize}
+
+We also used the model in a non-generative mode --- asking it to read and explain the existing code, recommend an implementation strategy (e.g.\ ``what's the simplest way to add a tsvector index?''), and audit the proposal PDF against our code to identify what was still missing.
+
+\section{Testing}
+
+Testing was primarily \emph{interactive and end-to-end} rather than unit-test-heavy:
+
+\begin{itemize}[leftmargin=1.2em,itemsep=1pt,topsep=2pt]
+\item \textbf{Database invariants checked via \texttt{psql}}, e.g.\ confirming the \texttt{search\_vector} column was populated for every row, that the \texttt{page\_rank} view contained one row per note, and that ``Operating Systems'' (the most-linked-to note in the seed) had the highest normalized score (1.0).
+\item \textbf{API smoke tests with \texttt{curl}} for every new endpoint --- \texttt{/api/search?q=memory} returns ``Memory Management'' first, with ``Operating Systems'' beating ``Virtual Memory'' \emph{only} once we add the graph component (demonstrating the combined ranking is doing what the proposal claimed); \texttt{/api/orphans} returns \verb|[]| for the well-connected seed; \texttt{/api/path} from ``Concurrency'' to ``Databases'' returns the expected 4-hop chain.
+\item \textbf{Upload validation:} POSTed a known-good PNG and got back the served URL with a \texttt{200 OK}; POSTed a \texttt{.txt} and confirmed the 400 with the allowed-types list.
+\item \textbf{Manual UI walkthrough} of: create/edit/delete a note, alias links rendering correctly, search highlighting on click-through from results, autocomplete keyboard navigation, image and PDF upload \& embed, graph drag/zoom/click, layout persistence across page reloads, ``Reset layout'' returning to auto-layout.
+\item \textbf{Build sanity:} every change passes \texttt{npm run build} (CRA's compile + ESLint pass) and \texttt{python -c "import main"} on the backend.
+\end{itemize}
+
+\section{What's Not Done (Future Work)}
+
+The proposal also mentioned scaling the dataset to ``a few hundred notes'' and producing quantitative benchmarks (\texttt{EXPLAIN ANALYZE} with vs.\ without the GIN index, with vs.\ without precomputed PageRank). The current seed is 10 notes; benchmarking against a larger corpus is the natural next step and is the main thing left from the original plan.
+
+\section{Submission Notes}
+
+The repository is public at \href{https://github.com/Mehul-Borad/Link-Notes-DBIS}{\texttt{github.com/Mehul-Borad/Link-Notes-DBIS}} (link at the top of this report). Per-file diffs against the initial commit are included as \texttt{*.diff} files in the submitted archive (generated with \texttt{git diff <initial-sha> -- <path>}). The full prompt log is \href{PROMPT_LOG.md}{\texttt{PROMPT\_LOG.md}} at the repo root; section~5 above ties prompt numbers to the features they produced.
+
+\end{document}

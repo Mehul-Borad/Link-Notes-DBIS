@@ -1,0 +1,21 @@
+diff --git a/backend/seed.py b/backend/seed.py
+index 7466abe..eb56c9e 100644
+--- a/backend/seed.py
++++ b/backend/seed.py
+@@ -1,5 +1,5 @@
+ """Seed the database with sample interconnected notes."""
+-from db import get_conn, init_db
++from db import get_conn, init_db, refresh_rankings
+ 
+ SAMPLE_NOTES = [
+     {
+@@ -161,7 +161,8 @@ def seed():
+     conn.commit()
+     cur.close()
+     conn.close()
+-    print(f"Seeded {len(SAMPLE_NOTES)} notes with links.")
++    refresh_rankings()
++    print(f"Seeded {len(SAMPLE_NOTES)} notes with links. PageRank refreshed.")
+ 
+ 
+ if __name__ == "__main__":

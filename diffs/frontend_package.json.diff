@@ -1,0 +1,12 @@
+diff --git a/frontend/package.json b/frontend/package.json
+index 2a9973b..709c181 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -9,6 +9,7 @@
+     "@testing-library/user-event": "^13.5.0",
+     "react": "^19.2.4",
+     "react-dom": "^19.2.4",
++    "react-force-graph-2d": "^1.29.1",
+     "react-scripts": "5.0.1",
+     "web-vitals": "^2.1.4"
+   },

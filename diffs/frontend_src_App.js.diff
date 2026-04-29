@@ -1,0 +1,704 @@
+diff --git a/frontend/src/App.js b/frontend/src/App.js
+index ae0e545..010de6b 100644
+--- a/frontend/src/App.js
++++ b/frontend/src/App.js
+@@ -1,8 +1,167 @@
+-import React, { useState, useEffect, useCallback } from "react";
++import React, { useState, useEffect, useCallback, useRef } from "react";
+ import "./App.css";
++import Graph from "./Graph";
+ 
+ const API = "http://localhost:8000/api";
+ 
++function NoteEditor({ value, onChange, notes, placeholder }) {
++  const taRef = useRef(null);
++  const fileRef = useRef(null);
++  const [ac, setAc] = useState({ active: false, matches: [], selected: 0 });
++  const [uploading, setUploading] = useState(false);
++
++  const insertAtCursor = (snippet) => {
++    const ta = taRef.current;
++    const caret = ta?.selectionStart ?? value.length;
++    const next = value.slice(0, caret) + snippet + value.slice(caret);
++    onChange(next);
++    setTimeout(() => {
++      ta?.focus();
++      const pos = caret + snippet.length;
++      ta?.setSelectionRange(pos, pos);
++    }, 0);
++  };
++
++  const handleUpload = async (e) => {
++    const file = e.target.files?.[0];
++    e.target.value = "";
++    if (!file) return;
++    setUploading(true);
++    try {
++      const fd = new FormData();
++      fd.append("file", file);
++      const res = await fetch(`${API}/upload`, { method: "POST", body: fd });
++      if (!res.ok) {
++        const err = await res.json().catch(() => ({}));
++        alert(err.detail || `Upload failed (${res.status})`);
++        return;
++      }
++      const data = await res.json();
++      insertAtCursor(`![${data.filename}](${data.url})`);
++    } finally {
++      setUploading(false);
++    }
++  };
++
++  const updateAutocomplete = (text, caret) => {
++    const before = text.slice(0, caret);
++    const lastOpen = before.lastIndexOf("[[");
++    const lastClose = before.lastIndexOf("]]");
++    if (lastOpen === -1 || lastOpen <= lastClose) {
++      setAc({ active: false, matches: [], selected: 0 });
++      return;
++    }
++    const partial = before.slice(lastOpen + 2);
++    if (partial.includes("\n") || partial.includes("]")) {
++      setAc({ active: false, matches: [], selected: 0 });
++      return;
++    }
++    const q = partial.toLowerCase();
++    const matches = notes
++      .filter((n) => n.title.toLowerCase().includes(q))
++      .slice(0, 8);
++    setAc({ active: matches.length > 0, matches, selected: 0 });
++  };
++
++  const handleChange = (e) => {
++    onChange(e.target.value);
++    updateAutocomplete(e.target.value, e.target.selectionStart);
++  };
++
++  const insertChoice = (title) => {
++    const ta = taRef.current;
++    if (!ta) return;
++    const caret = ta.selectionStart;
++    const before = value.slice(0, caret);
++    const lastOpen = before.lastIndexOf("[[");
++    if (lastOpen === -1) return;
++    const newValue =
++      value.slice(0, lastOpen + 2) + title + "]]" + value.slice(caret);
++    onChange(newValue);
++    setAc({ active: false, matches: [], selected: 0 });
++    setTimeout(() => {
++      ta.focus();
++      const newPos = lastOpen + 2 + title.length + 2;
++      ta.setSelectionRange(newPos, newPos);
++    }, 0);
++  };
++
++  const handleKeyDown = (e) => {
++    if (!ac.active) return;
++    if (e.key === "ArrowDown") {
++      e.preventDefault();
++      setAc((s) => ({
++        ...s,
++        selected: (s.selected + 1) % s.matches.length,
++      }));
++    } else if (e.key === "ArrowUp") {
++      e.preventDefault();
++      setAc((s) => ({
++        ...s,
++        selected: (s.selected - 1 + s.matches.length) % s.matches.length,
++      }));
++    } else if (e.key === "Enter" || e.key === "Tab") {
++      e.preventDefault();
++      insertChoice(ac.matches[ac.selected].title);
++    } else if (e.key === "Escape") {
++      e.preventDefault();
++      setAc({ active: false, matches: [], selected: 0 });
++    }
++  };
++
++  return (
++    <div className="editor-wrap">
++      <div className="editor-toolbar">
++        <button
++          type="button"
++          className="btn btn-mini"
++          onClick={() => fileRef.current?.click()}
++          disabled={uploading}
++        >
++          {uploading ? "Uploading..." : "+ Attach image / PDF"}
++        </button>
++        <input
++          ref={fileRef}
++          type="file"
++          accept="image/png,image/jpeg,image/gif,image/webp,application/pdf"
++          onChange={handleUpload}
++          style={{ display: "none" }}
++        />
++      </div>
++      <textarea
++        ref={taRef}
++        className="note-content-input"
++        placeholder={placeholder}
++        value={value}
++        onChange={handleChange}
++        onKeyDown={handleKeyDown}
++        onBlur={() =>
++          setTimeout(
++            () => setAc({ active: false, matches: [], selected: 0 }),
++            150
++          )
++        }
++      />
++      {ac.active && (
++        <ul className="autocomplete">
++          {ac.matches.map((n, i) => (
++            <li
++              key={n.id}
++              className={i === ac.selected ? "active" : ""}
++              onMouseDown={(e) => {
++                e.preventDefault();
++                insertChoice(n.title);
++              }}
++            >
++              {n.title}
++            </li>
++          ))}
++        </ul>
++      )}
++    </div>
++  );
++}
++
+ function App() {
+   const [notes, setNotes] = useState([]);
+   const [selectedNote, setSelectedNote] = useState(null);
+@@ -11,6 +170,17 @@ function App() {
+   const [content, setContent] = useState("");
+   const [creating, setCreating] = useState(false);
+ 
++  const [query, setQuery] = useState("");
++  const [searchResults, setSearchResults] = useState(null);
++  const [orphans, setOrphans] = useState(null);
++
++  const [pathTarget, setPathTarget] = useState("");
++  const [pathResult, setPathResult] = useState(null);
++
++  const [highlightTerms, setHighlightTerms] = useState([]);
++
++  const [view, setView] = useState("notes");
++
+   const fetchNotes = useCallback(async () => {
+     const res = await fetch(`${API}/notes`);
+     const data = await res.json();
+@@ -27,6 +197,9 @@ function App() {
+     setSelectedNote(data);
+     setEditing(false);
+     setCreating(false);
++    setPathResult(null);
++    setPathTarget("");
++    setView("notes");
+   };
+ 
+   const startCreate = () => {
+@@ -84,57 +257,285 @@ function App() {
+     fetchNotes();
+   };
+ 
+-  // Render note content with clickable [[links]]
++  const runSearch = async (e) => {
++    e?.preventDefault();
++    const q = query.trim();
++    if (!q) {
++      setSearchResults(null);
++      setHighlightTerms([]);
++      return;
++    }
++    setOrphans(null);
++    const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
++    const data = await res.json();
++    setSearchResults(data);
++    setHighlightTerms(
++      q
++        .toLowerCase()
++        .split(/\s+/)
++        .filter((t) => t.length > 1)
++    );
++  };
++
++  const clearSearch = () => {
++    setQuery("");
++    setSearchResults(null);
++    setHighlightTerms([]);
++  };
++
++  const loadOrphans = async () => {
++    setSearchResults(null);
++    const res = await fetch(`${API}/orphans`);
++    const data = await res.json();
++    setOrphans(data);
++  };
++
++  const refreshRankings = async () => {
++    const res = await fetch(`${API}/admin/refresh-rankings`, { method: "POST" });
++    const data = await res.json();
++    alert(`Rankings refreshed (${data.rows} notes)`);
++  };
++
++  const findPath = async (e) => {
++    e?.preventDefault();
++    if (!selectedNote || !pathTarget) return;
++    const target = notes.find(
++      (n) => n.title.toLowerCase() === pathTarget.trim().toLowerCase()
++    );
++    if (!target) {
++      setPathResult({ found: false, error: "Target note not found" });
++      return;
++    }
++    const res = await fetch(
++      `${API}/path?from_id=${selectedNote.id}&to_id=${target.id}`
++    );
++    const data = await res.json();
++    setPathResult(data);
++  };
++
++  const highlight = (text, keyPrefix) => {
++    if (!highlightTerms.length || !text) return text;
++    const escaped = highlightTerms.map((t) =>
++      t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
++    );
++    const re = new RegExp(`(${escaped.join("|")})`, "gi");
++    const parts = text.split(re);
++    return parts.map((p, i) =>
++      i % 2 === 1 ? (
++        <mark key={`${keyPrefix}-${i}`}>{p}</mark>
++      ) : (
++        <React.Fragment key={`${keyPrefix}-${i}`}>{p}</React.Fragment>
++      )
++    );
++  };
++
++  const isImageUrl = (url) => /\.(png|jpe?g|gif|webp|svg)(\?.*)?$/i.test(url);
++  const isPdfUrl = (url) => /\.pdf(\?.*)?$/i.test(url);
++
+   const renderContent = (text) => {
+-    const parts = text.split(/(\[\[.+?\]\])/g);
+-    return parts.map((part, i) => {
+-      const match = part.match(/^\[\[(.+?)\]\]$/);
+-      if (match) {
+-        const linkTitle = match[1];
++    const TOKEN_RE =
++      /(\[\[[^\]|]+(?:\|[^\]]+)?\]\])|(!\[[^\]]*\]\([^)]+\))|(\[[^\]]+\]\([^)]+\))/g;
++    const out = [];
++    let last = 0;
++    let m;
++    let key = 0;
++    while ((m = TOKEN_RE.exec(text)) !== null) {
++      if (m.index > last) {
++        const slice = text.slice(last, m.index);
++        out.push(
++          <React.Fragment key={`t-${key++}`}>
++            {highlight(slice, `t-${key}`)}
++          </React.Fragment>
++        );
++      }
++      const tok = m[0];
++      if (tok.startsWith("[[")) {
++        const wikiM = tok.match(/^\[\[([^|\]]+)(?:\|([^\]]+))?\]\]$/);
++        const linkTitle = wikiM[1];
++        const display = wikiM[2] || wikiM[1];
+         const linked = notes.find((n) => n.title === linkTitle);
+-        if (linked) {
+-          return (
++        out.push(
++          linked ? (
+             <span
+-              key={i}
++              key={`w-${key++}`}
+               className="wiki-link"
+               onClick={() => openNote(linked.id)}
+             >
+-              {linkTitle}
++              {highlight(display, `w-${key}`)}
++            </span>
++          ) : (
++            <span key={`w-${key++}`} className="wiki-link broken">
++              {highlight(display, `w-${key}`)}
+             </span>
++          )
++        );
++      } else if (tok.startsWith("!")) {
++        const mediaM = tok.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
++        const alt = mediaM[1];
++        const url = mediaM[2];
++        if (isPdfUrl(url)) {
++          out.push(
++            <div className="embed-pdf" key={`p-${key++}`}>
++              <iframe src={url} title={alt || "pdf"} />
++              <a href={url} target="_blank" rel="noopener noreferrer">
++                Open PDF ↗
++              </a>
++            </div>
++          );
++        } else if (isImageUrl(url)) {
++          out.push(
++            <img
++              key={`i-${key++}`}
++              src={url}
++              alt={alt}
++              className="embed-img"
++            />
++          );
++        } else {
++          out.push(
++            <a
++              key={`u-${key++}`}
++              href={url}
++              target="_blank"
++              rel="noopener noreferrer"
++              className="ext-link"
++            >
++              {alt || url} ↗
++            </a>
+           );
+         }
+-        return (
+-          <span key={i} className="wiki-link broken">
+-            {linkTitle}
+-          </span>
++      } else {
++        const linkM = tok.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
++        out.push(
++          <a
++            key={`u-${key++}`}
++            href={linkM[2]}
++            target="_blank"
++            rel="noopener noreferrer"
++            className="ext-link"
++          >
++            {highlight(linkM[1], `u-${key}`)} ↗
++          </a>
+         );
+       }
+-      return <span key={i}>{part}</span>;
+-    });
++      last = m.index + tok.length;
++    }
++    if (last < text.length) {
++      out.push(
++        <React.Fragment key={`t-${key++}`}>
++          {highlight(text.slice(last), `t-${key}`)}
++        </React.Fragment>
++      );
++    }
++    return out;
+   };
+ 
+   return (
+     <div className="app">
+       <aside className="sidebar">
+         <h2>LinkNotes</h2>
+-        <button className="btn btn-primary" onClick={startCreate}>
++
++        <form className="search-bar" onSubmit={runSearch}>
++          <input
++            type="text"
++            placeholder="Search notes..."
++            value={query}
++            onChange={(e) => setQuery(e.target.value)}
++          />
++          {searchResults !== null && (
++            <button type="button" className="search-clear" onClick={clearSearch}>
++              ×
++            </button>
++          )}
++        </form>
++
++        <button className="btn btn-primary btn-block" onClick={startCreate}>
+           + New Note
+         </button>
+-        <ul className="note-list">
+-          {notes.map((n) => (
+-            <li
+-              key={n.id}
+-              className={selectedNote?.id === n.id ? "active" : ""}
+-              onClick={() => openNote(n.id)}
++        <div className="sidebar-actions">
++          <button
++            className={`btn btn-mini ${view === "graph" ? "active-toggle" : ""}`}
++            onClick={() => setView(view === "graph" ? "notes" : "graph")}
++          >
++            {view === "graph" ? "← Notes" : "Graph"}
++          </button>
++          <button className="btn btn-mini" onClick={loadOrphans}>
++            Orphans
++          </button>
++          <button className="btn btn-mini" onClick={refreshRankings}>
++            Refresh ranks
++          </button>
++        </div>
++
++        {searchResults !== null ? (
++          <div className="sidebar-section">
++            <h3>Results ({searchResults.length})</h3>
++            <ul className="note-list">
++              {searchResults.map((r) => (
++                <li
++                  key={r.id}
++                  className={selectedNote?.id === r.id ? "active" : ""}
++                  onClick={() => openNote(r.id)}
++                >
++                  <div>{r.title}</div>
++                  <div className="result-meta">
++                    text {r.text_score.toFixed(3)} · graph{" "}
++                    {r.graph_score.toFixed(3)}
++                  </div>
++                </li>
++              ))}
++              {searchResults.length === 0 && (
++                <li className="empty-list">No matches</li>
++              )}
++            </ul>
++          </div>
++        ) : orphans !== null ? (
++          <div className="sidebar-section">
++            <h3>Orphan notes ({orphans.length})</h3>
++            <ul className="note-list">
++              {orphans.map((n) => (
++                <li
++                  key={n.id}
++                  className={selectedNote?.id === n.id ? "active" : ""}
++                  onClick={() => openNote(n.id)}
++                >
++                  {n.title}
++                </li>
++              ))}
++              {orphans.length === 0 && (
++                <li className="empty-list">No orphans</li>
++              )}
++            </ul>
++            <button
++              className="btn btn-mini"
++              onClick={() => setOrphans(null)}
+             >
+-              {n.title}
+-            </li>
+-          ))}
+-        </ul>
++              ← Back to all notes
++            </button>
++          </div>
++        ) : (
++          <ul className="note-list">
++            {notes.map((n) => (
++              <li
++                key={n.id}
++                className={selectedNote?.id === n.id ? "active" : ""}
++                onClick={() => openNote(n.id)}
++              >
++                {n.title}
++              </li>
++            ))}
++          </ul>
++        )}
+       </aside>
+ 
+-      <main className="main-content">
+-        {creating && (
++      <main className={`main-content ${view === "graph" ? "main-graph" : ""}`}>
++        {view === "graph" && (
++          <Graph
++            onNodeClick={openNote}
++            selectedId={selectedNote?.id}
++          />
++        )}
++        {view === "notes" && creating && (
+           <div className="note-view">
+             <input
+               className="note-title-input"
+@@ -142,11 +543,13 @@ function App() {
+               value={title}
+               onChange={(e) => setTitle(e.target.value)}
+             />
+-            <textarea
+-              className="note-content-input"
+-              placeholder="Write your note... Use [[Note Title]] to link to other notes."
++            <NoteEditor
+               value={content}
+-              onChange={(e) => setContent(e.target.value)}
++              onChange={setContent}
++              notes={notes}
++              placeholder={
++                "Write your note...\n[[Note Title]] - link to another note\n![alt](url.jpg / url.pdf) - embed image or PDF\n[text](https://...) - external link"
++              }
+             />
+             <div className="actions">
+               <button className="btn btn-primary" onClick={saveNewNote}>
+@@ -159,16 +562,22 @@ function App() {
+           </div>
+         )}
+ 
+-        {selectedNote && !editing && (
++        {view === "notes" && selectedNote && !editing && (
+           <div className="note-view">
+-            <h1>{selectedNote.title}</h1>
+-            <div className="note-content">{renderContent(selectedNote.content)}</div>
++            <h1>{highlight(selectedNote.title, "title")}</h1>
++            <div className="note-content">
++              {renderContent(selectedNote.content)}
++            </div>
+ 
+             {selectedNote.links?.length > 0 && (
+               <div className="note-links">
+                 <h3>Links to:</h3>
+                 {selectedNote.links.map((l) => (
+-                  <span key={l.id} className="tag" onClick={() => openNote(l.id)}>
++                  <span
++                    key={l.id}
++                    className="tag"
++                    onClick={() => openNote(l.id)}
++                  >
+                     {l.title}
+                   </span>
+                 ))}
+@@ -179,13 +588,67 @@ function App() {
+               <div className="note-links">
+                 <h3>Linked from:</h3>
+                 {selectedNote.backlinks.map((l) => (
+-                  <span key={l.id} className="tag" onClick={() => openNote(l.id)}>
++                  <span
++                    key={l.id}
++                    className="tag"
++                    onClick={() => openNote(l.id)}
++                  >
+                     {l.title}
+                   </span>
+                 ))}
+               </div>
+             )}
+ 
++            <div className="path-finder">
++              <h3>Find path to:</h3>
++              <form onSubmit={findPath}>
++                <input
++                  list="note-titles"
++                  className="path-input"
++                  placeholder="Target note title..."
++                  value={pathTarget}
++                  onChange={(e) => setPathTarget(e.target.value)}
++                />
++                <datalist id="note-titles">
++                  {notes.map((n) => (
++                    <option key={n.id} value={n.title} />
++                  ))}
++                </datalist>
++                <button className="btn btn-mini" type="submit">
++                  Find
++                </button>
++              </form>
++              {pathResult && (
++                <div className="path-result">
++                  {pathResult.error ? (
++                    <em>{pathResult.error}</em>
++                  ) : pathResult.found ? (
++                    <div>
++                      Distance: {pathResult.depth} hop
++                      {pathResult.depth === 1 ? "" : "s"}
++                      <div className="path-chain">
++                        {pathResult.path.map((p, i) => (
++                          <React.Fragment key={p.id}>
++                            <span
++                              className="tag"
++                              onClick={() => openNote(p.id)}
++                            >
++                              {p.title}
++                            </span>
++                            {i < pathResult.path.length - 1 && (
++                              <span className="path-arrow">→</span>
++                            )}
++                          </React.Fragment>
++                        ))}
++                      </div>
++                    </div>
++                  ) : (
++                    <em>No path found</em>
++                  )}
++                </div>
++              )}
++            </div>
++
+             <div className="actions">
+               <button className="btn btn-primary" onClick={startEdit}>
+                 Edit
+@@ -197,17 +660,20 @@ function App() {
+           </div>
+         )}
+ 
+-        {selectedNote && editing && (
++        {view === "notes" && selectedNote && editing && (
+           <div className="note-view">
+             <input
+               className="note-title-input"
+               value={title}
+               onChange={(e) => setTitle(e.target.value)}
+             />
+-            <textarea
+-              className="note-content-input"
++            <NoteEditor
+               value={content}
+-              onChange={(e) => setContent(e.target.value)}
++              onChange={setContent}
++              notes={notes}
++              placeholder={
++                "[[Note Title]] - link · ![alt](url) - embed · [text](url) - external link"
++              }
+             />
+             <div className="actions">
+               <button className="btn btn-primary" onClick={saveEdit}>
+@@ -220,13 +686,47 @@ function App() {
+           </div>
+         )}
+ 
+-        {!selectedNote && !creating && (
++        {view === "notes" && !selectedNote && !creating && searchResults !== null && (
++          <div className="empty-state">
++            <h2>Search results</h2>
++            {searchResults.length === 0 ? (
++              <p>No notes match "{query}".</p>
++            ) : (
++              <div className="search-result-list">
++                {searchResults.map((r) => (
++                  <div
++                    key={r.id}
++                    className="search-result"
++                    onClick={() => openNote(r.id)}
++                  >
++                    <h3>{r.title}</h3>
++                    <div
++                      className="snippet"
++                      dangerouslySetInnerHTML={{ __html: r.snippet }}
++                    />
++                    <div className="result-meta">
++                      combined {r.combined_score.toFixed(3)} · text{" "}
++                      {r.text_score.toFixed(3)} · graph{" "}
++                      {r.graph_score.toFixed(3)}
++                    </div>
++                  </div>
++                ))}
++              </div>
++            )}
++          </div>
++        )}
++
++        {view === "notes" && !selectedNote && !creating && searchResults === null && (
+           <div className="empty-state">
+             <h2>Welcome to LinkNotes</h2>
+             <p>Select a note from the sidebar or create a new one.</p>
+             <p>
+               Link notes together using <code>[[Note Title]]</code> syntax.
+             </p>
++            <p>
++              Search ranks results by text relevance + PageRank graph
++              centrality.
++            </p>
+           </div>
+         )}
+       </main>
