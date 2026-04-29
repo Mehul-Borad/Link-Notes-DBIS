@@ -1,5 +1,5 @@
 diff --git a/backend/seed.py b/backend/seed.py
-index 7466abe..eb56c9e 100644
+index 7466abe..bb0bf15 100644
 --- a/backend/seed.py
 +++ b/backend/seed.py
 @@ -1,5 +1,5 @@
@@ -9,7 +9,195 @@ index 7466abe..eb56c9e 100644
  
  SAMPLE_NOTES = [
      {
-@@ -161,7 +161,8 @@ def seed():
+@@ -121,6 +121,187 @@ Key concepts:
+ Database management systems (DBMS) like PostgreSQL use [[Data Structures]] extensively.
+ See also: [[File Systems]] for underlying storage.""",
+     },
++    # --- Algorithms cluster (extended seed for richer testing) ---
++    {
++        "title": "Algorithms",
++        "content": """An algorithm is a finite sequence of well-defined instructions that solves a problem in a finite number of steps.
++
++Common algorithm classes:
++- [[Sorting]] - arranging items in order
++- Search - linear, binary, hash-based
++- [[Dynamic Programming]] - solving problems by combining sub-solutions
++- Greedy methods, divide-and-conquer
++
++Algorithms are designed on top of particular [[Data Structures|data structures]] and analyzed for correctness and time/space complexity. See also: [[Hash Tables]] and [[B-Trees]].""",
++    },
++    {
++        "title": "Sorting",
++        "content": """Sorting arranges elements of a list in a specific order (typically ascending).
++
++Comparison-based [[Algorithms]]:
++- Quicksort, Mergesort, Heapsort - O(n log n)
++- Insertion sort, Bubble sort - O(n^2)
++
++Non-comparison sorts (Counting, Radix, Bucket) can do better than O(n log n) under restrictions on input.
++
++Stable sorts preserve the relative order of equal keys, which matters when sorting [[Data Structures|data structures]] like records by multiple fields.""",
++    },
++    {
++        "title": "Dynamic Programming",
++        "content": """Dynamic Programming (DP) solves problems by breaking them into overlapping sub-problems and reusing answers.
++
++Two ingredients:
++- Optimal substructure
++- Overlapping sub-problems
++
++Classic examples include shortest paths, edit distance, knapsack, and matrix chain multiplication.
++
++Closely related to [[Algorithms|algorithm]] design and often implemented with arrays or [[Hash Tables]] as memoization tables.""",
++    },
++    {
++        "title": "Hash Tables",
++        "content": """A hash table is a [[Data Structures|data structure]] mapping keys to values via a hash function, giving O(1) expected lookup.
++
++Collisions are handled by:
++- Separate chaining (linked lists per bucket)
++- Open addressing (linear/quadratic probing)
++
++Used heavily in [[Algorithms]], [[Databases]] (hash indexes), and language runtimes (dictionaries, sets). Worst-case behavior degrades when the hash function is poor or under adversarial input.""",
++    },
++    # --- Networks cluster ---
++    {
++        "title": "Computer Networks",
++        "content": """Computer networks connect machines so they can exchange information.
++
++Models and concepts:
++- OSI 7-layer model
++- TCP/IP 4-layer model (see [[TCP IP]])
++- Routing, switching, addressing
++
++Networking is implemented at the [[Operating Systems|OS]] level via the network stack and is the substrate for protocols like [[HTTP]].""",
++    },
++    {
++        "title": "TCP IP",
++        "content": """TCP/IP is the protocol suite that powers the modern internet.
++
++Layers:
++1. Link (Ethernet, Wi-Fi)
++2. Internet (IP)
++3. Transport (TCP, UDP)
++4. Application ([[HTTP]], DNS, SMTP)
++
++Closely tied to [[Computer Networks]] and to [[Operating Systems]] which implement the stack in kernel space.""",
++    },
++    {
++        "title": "HTTP",
++        "content": """HTTP (HyperText Transfer Protocol) is the application-layer protocol of the World Wide Web.
++
++Key features:
++- Stateless request/response
++- Methods: GET, POST, PUT, DELETE, etc.
++- Status codes (2xx, 3xx, 4xx, 5xx)
++- Sits on top of [[TCP IP|TCP]]
++
++Modern variants HTTP/2 and HTTP/3 multiplex requests and use binary framing. Crucial for understanding [[Computer Networks]].""",
++    },
++    # --- Compilers cluster (creates a longer path for /api/path testing) ---
++    {
++        "title": "Compilers",
++        "content": """A compiler translates source code from a high-level language into a lower-level language (typically machine code).
++
++Major phases:
++- [[Lexical Analysis]] - tokenization
++- [[Parsing]] - building a syntax tree
++- Semantic analysis - type checking
++- Optimization
++- Code generation
++
++Compilers depend heavily on [[Data Structures]] (trees, graphs, symbol tables) and rely on services from the [[Operating Systems]].""",
++    },
++    {
++        "title": "Parsing",
++        "content": """Parsing builds a structured representation (parse tree / AST) from a stream of tokens produced by [[Lexical Analysis]].
++
++Two main families:
++- Top-down: recursive descent, LL parsers
++- Bottom-up: LR family, used in tools like yacc/bison
++
++Output of the parser is consumed by later phases of [[Compilers]] for semantic analysis and code generation.""",
++    },
++    {
++        "title": "Lexical Analysis",
++        "content": """Lexical analysis (lexing or tokenization) breaks the source character stream into tokens.
++
++Tools and techniques:
++- Regular expressions, finite automata
++- Hand-written or generated (lex, flex)
++
++Output feeds into [[Parsing]] which is the next phase of [[Compilers]]. Reuses ideas from [[Algorithms]] (state-machine simulation) and [[Data Structures|data structures]].""",
++    },
++    # --- Demo notes that exercise the markdown rendering features ---
++    {
++        "title": "Markdown Syntax",
++        "content": """LinkNotes supports several inline syntaxes inside note content.
++
++Wiki-style note links:
++- [[Operating Systems]] - direct link
++- [[Operating Systems|the OS note]] - link with a display alias
++
++Embedded media (URL-based; the editor's Attach button can also upload local files):
++- ![PageRank diagram](https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/PageRanks-Example.svg/600px-PageRanks-Example.svg.png)
++- ![Sample PDF](https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf)
++
++External links:
++- [PageRank on Wikipedia](https://en.wikipedia.org/wiki/PageRank)
++- [PostgreSQL full-text search docs](https://www.postgresql.org/docs/current/textsearch.html)
++
++Useful when documenting bigger topics like [[Algorithms]] or [[Databases]].""",
++    },
++    {
++        "title": "Resources",
++        "content": """A collection of useful external references.
++
++Foundational:
++- [Donald Knuth's home page](https://www-cs-faculty.stanford.edu/~knuth/)
++- [Computer Science topics on Wikipedia](https://en.wikipedia.org/wiki/Outline_of_computer_science)
++
++Database-specific:
++- [PostgreSQL documentation](https://www.postgresql.org/docs/)
++- [Use The Index, Luke!](https://use-the-index-luke.com/)
++
++Related notes: [[Databases]], [[Algorithms]], [[Operating Systems]].""",
++    },
++    {
++        "title": "PageRank Visualization",
++        "content": """The PageRank algorithm assigns each node an importance score derived from the structure of incoming links.
++
++![A small graph with PageRank scores](https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/PageRanks-Example.svg/600px-PageRanks-Example.svg.png)
++
++The image shows a classic example: node B has the highest rank because many other (already-important) pages point to it.
++
++LinkNotes uses the same idea over the [[Databases|database]] of notes - see also [[Algorithms]] and the original [paper by Brin and Page](http://infolab.stanford.edu/~backrub/google.html).""",
++    },
++    # --- Intentional orphans (no incoming or outgoing links) for /api/orphans ---
++    {
++        "title": "Reading List",
++        "content": """Books I want to read this semester. (This note is intentionally not connected to any other note - it should appear under Orphans.)
++
++- "The Art of Computer Programming" - Knuth
++- "Database System Concepts" - Silberschatz, Korth, Sudarshan
++- "Designing Data-Intensive Applications" - Kleppmann
++
++Find them at [Goodreads](https://www.goodreads.com/) or your local library.""",
++    },
++    {
++        "title": "Scratch",
++        "content": """Quick personal scratch space - todos, half-formed thoughts.
++
++- Try the new pgvector extension
++- Read up on DuckDB internals
++- Refresh on relational algebra
++
++(Orphan note - no wiki-links in or out.)""",
++    },
+ ]
+ 
+ 
+@@ -161,7 +342,8 @@ def seed():
      conn.commit()
      cur.close()
      conn.close()

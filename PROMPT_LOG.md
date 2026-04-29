@@ -175,3 +175,16 @@ Prompts used while building this project. Used Claude (Sonnet) for most of the c
 ## Prompt 25
 
 > persist the node positions across reloads. on every drag-end save {id: {x, y}} into localStorage under "linknotes-graph-layout-v1". on graph mount, restore them by setting fx/fy on each node before passing the data to ForceGraph2D. nodes that dont have a saved position get force-laid-out around the pinned ones. also add a "Reset layout" button in the corner of the graph view that wipes the saved positions and re-runs the simulation
+
+---
+
+## Prompt 26
+
+> the existing seed only has 10 notes and they're all interconnected so several features have nothing to demo. expand seed.py with more notes that exercise everything:
+> - a few extra topic clusters (algorithms, networks, compilers/parsing/lexical analysis) to make the graph richer and let /api/path return longer chains
+> - at least one note that uses [[Title|Alias]] syntax so the alias-bug fix is visible
+> - a "Markdown Syntax" demo note with examples of ![alt](url) image embed, ![alt](url.pdf) pdf embed, and [text](url) external links using stable public URLs (wikipedia commons / w3c)
+> - a "PageRank Visualization" note with an embedded image
+> - a "Resources" note with a few external links
+> - 2 intentionally orphan notes (no incoming or outgoing wiki-links) so /api/orphans returns something
+> aim for ~25 notes total. seed.py should still call refresh_rankings() at the end so PageRank gets recomputed

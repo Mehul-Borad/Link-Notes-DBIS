@@ -78,7 +78,7 @@ The project also gave us an excuse to push PostgreSQL beyond simple CRUD: we use
 \item Full CRUD on notes: title (unique), content, timestamps. Endpoints \texttt{GET/POST/PUT/DELETE /api/notes} \prms{1}{6}.
 \item \texttt{[[Title]]} and \texttt{[[Title|Alias]]} wiki-link parsing. On every save, \texttt{sync\_links()} reparses the content and rewrites the directed-edge rows in the \texttt{links} table.
 \item Backlink listing: \texttt{GET /api/notes/\{id\}} returns the note plus its outgoing links \emph{and} the notes that link to it (joined to titles).
-\item Sample seed of 10 interconnected CS notes (Operating Systems, B-Trees, etc.) so the graph has interesting structure out of the box \prm{7}.
+\item Sample seed of 25 interconnected notes covering several topic clusters (operating systems, algorithms, networks, compilers) plus dedicated demo notes for embeds/aliases/externals and two intentional orphans, so every feature has data to exercise it out of the box \prm{7}, \prm{26}.
 \item React SPA: sidebar of titles, main view, create/edit/delete forms, clickable wiki links (red), broken links shown gray with strike-through \prms{8}{11}.
 \item Bug fix in the alias regex: \texttt{[[Operating Systems|OS]]} previously stored the entire \texttt{Operating Systems|OS} string as the lookup key, so the link silently failed; the regex now strips the alias \prm{12}.
 \end{itemize}
@@ -176,20 +176,21 @@ We used Claude (the \texttt{Sonnet} family) for nearly all code generation, then
 \item \prms{13}{17} \emph{The DB-heavy core.} Full-text search with weighted tsvector + GIN, the PL/pgSQL PageRank with iteration loop and convergence check, materialized view + refresh endpoint, combined ranking, orphan detection, recursive-CTE BFS for shortest path, and the corresponding React UI.
 \item \prm{18} \emph{Debugging.} Diagnosing and fixing the ``cannot create temporary table within security-restricted operation'' error from \texttt{REFRESH MATERIALIZED VIEW}, which led us to switch from temp tables to a persistent \texttt{pr\_state} table.
 \item \prms{19}{25} \emph{Polish features.} Search highlighting, \texttt{[[} autocomplete, image/PDF/external-link rendering, the graph view with react-force-graph-2d, file uploads with multipart parsing, the rectangle-node redesign with freeze-on-drag, and \texttt{localStorage}-backed layout persistence.
+\item \prm{26} \emph{Test data.} Expanding the seed to 25 notes covering every feature path (aliases, embeds, externals, orphans, longer multi-cluster paths).
 \end{itemize}
 
 We also used the model in a non-generative mode --- asking it to read and explain the existing code, recommend an implementation strategy (e.g.\ ``what's the simplest way to add a tsvector index?''), and audit the proposal PDF against our code to identify what was still missing.
 
 \section{Testing}
 
-Testing was primarily \emph{interactive and end-to-end} rather than unit-test-heavy:
+Testing was primarily \emph{interactive and end-to-end}. The seed (\texttt{seed.py}) contains 25 notes and 68 directed edges, chosen so every feature has at least one note that exercises it: aliases (e.g.\ \texttt{[[Operating Systems|the OS note]]}), markdown image and PDF embeds, external links, two intentional orphans, and multi-hop paths across topic clusters.
 
 \begin{itemize}[leftmargin=1.2em,itemsep=1pt,topsep=2pt]
-\item \textbf{Database invariants checked via \texttt{psql}}, e.g.\ confirming the \texttt{search\_vector} column was populated for every row, that the \texttt{page\_rank} view contained one row per note, and that ``Operating Systems'' (the most-linked-to note in the seed) had the highest normalized score (1.0).
-\item \textbf{API smoke tests with \texttt{curl}} for every new endpoint --- \texttt{/api/search?q=memory} returns ``Memory Management'' first, with ``Operating Systems'' beating ``Virtual Memory'' \emph{only} once we add the graph component (demonstrating the combined ranking is doing what the proposal claimed); \texttt{/api/orphans} returns \verb|[]| for the well-connected seed; \texttt{/api/path} from ``Concurrency'' to ``Databases'' returns the expected 4-hop chain.
-\item \textbf{Upload validation:} POSTed a known-good PNG and got back the served URL with a \texttt{200 OK}; POSTed a \texttt{.txt} and confirmed the 400 with the allowed-types list.
-\item \textbf{Manual UI walkthrough} of: create/edit/delete a note, alias links rendering correctly, search highlighting on click-through from results, autocomplete keyboard navigation, image and PDF upload \& embed, graph drag/zoom/click, layout persistence across page reloads, ``Reset layout'' returning to auto-layout.
-\item \textbf{Build sanity:} every change passes \texttt{npm run build} (CRA's compile + ESLint pass) and \texttt{python -c "import main"} on the backend.
+\item \textbf{DB invariants via \texttt{psql}}: \texttt{search\_vector} populated for every row, \texttt{page\_rank} has one row per note, and the highest-ranked note matches the most-linked-to one (Operating Systems = 1.0).
+\item \textbf{API smoke tests} (\texttt{curl}): \texttt{/api/search?q=memory} ranks ``Memory Management'' first, with ``Operating Systems'' overtaking ``Virtual Memory'' \emph{only} after the graph weight kicks in --- exactly the behavior the proposal predicted; \texttt{/api/orphans} returns the two seeded orphans; \texttt{/api/path} returns paths of depth 2--4 between cross-cluster pairs.
+\item \textbf{Upload:} a PNG returns 200 + served URL; a \texttt{.txt} returns 400 with the allowed-types list.
+\item \textbf{Manual UI walkthrough} of every feature on the seed: alias rendering, search highlighting on click-through, autocomplete keyboard nav, URL and uploaded embeds, external links, graph drag/zoom/click, layout persistence, ``Reset layout''.
+\item \textbf{Build sanity:} \texttt{npm run build} and \texttt{python -c "import main"} pass on every change.
 \end{itemize}
 
 \section{What's Not Done (Future Work)}
