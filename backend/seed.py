@@ -248,8 +248,8 @@ Wiki-style note links:
 - [[Operating Systems|the OS note]] - link with a display alias
 
 Embedded media (URL-based; the editor's Attach button can also upload local files):
-- ![PageRank diagram](https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/PageRanks-Example.svg/600px-PageRanks-Example.svg.png)
-- ![Sample PDF](https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf)
+- ![Random demo image](https://picsum.photos/seed/linknotes/600/360)
+- ![Sample PDF (PPO paper, arXiv)](https://arxiv.org/pdf/1707.06347)
 
 External links:
 - [PageRank on Wikipedia](https://en.wikipedia.org/wiki/PageRank)
@@ -275,9 +275,9 @@ Related notes: [[Databases]], [[Algorithms]], [[Operating Systems]].""",
         "title": "PageRank Visualization",
         "content": """The PageRank algorithm assigns each node an importance score derived from the structure of incoming links.
 
-![A small graph with PageRank scores](https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/PageRanks-Example.svg/600px-PageRanks-Example.svg.png)
+![PageRank graph (placeholder)](https://placehold.co/600x360/1a1a2e/ffffff?text=PageRank+graph+demo)
 
-The image shows a classic example: node B has the highest rank because many other (already-important) pages point to it.
+A canonical illustration would show a node with many incoming arrows from other already-important pages getting the highest rank. The placeholder above is just to verify image rendering - see the [interactive Wikipedia diagram](https://en.wikipedia.org/wiki/PageRank#/media/File:PageRanks-Example.svg) for the real thing.
 
 LinkNotes uses the same idea over the [[Databases|database]] of notes - see also [[Algorithms]] and the original [paper by Brin and Page](http://infolab.stanford.edu/~backrub/google.html).""",
     },
