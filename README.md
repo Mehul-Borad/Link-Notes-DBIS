@@ -5,7 +5,6 @@ A personal knowledge-base / wiki built for **CS349 (DBIS Lab)**. Notes link to o
 The project is deliberately database-heavy: full-text search via `tsvector` + GIN, PageRank computed inside PostgreSQL with a PL/pgSQL function and a materialized view, and shortest-path queries written as recursive CTEs.
 
 > Full project report: [`report.pdf`](report.pdf) (LaTeX source in [`report.tex`](report.tex)).
-> Prompt log used during development: [`PROMPT_LOG.md`](PROMPT_LOG.md).
 
 ---
 
